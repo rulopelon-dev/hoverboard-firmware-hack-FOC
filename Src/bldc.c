@@ -56,6 +56,23 @@ int16_t curR_phaB = 0, curR_phaC = 0, curR_DC = 0;
 volatile int pwml = 0;
 volatile int pwmr = 0;
 
+// ---- Hall step counters (1 step = 1/6 electrical revolution) ----
+// Same hall->position table the controller uses (vec_hallToPos), index = A<<2 | B<<1 | C. -1 = invalid state (000/111)
+volatile int32_t stepsLeft  = 0;
+volatile int32_t stepsRight = 0;
+static const int8_t hallPos[8] = { -1, 2, 0, 1, 4, 3, 5, -1 };
+
+static inline void countSteps(volatile int32_t *cnt, int8_t *prev, uint8_t hall) {
+  int8_t p = hallPos[hall];
+  if (p < 0) return;                      // ignore glitches / invalid states
+  if (*prev >= 0) {
+    int8_t d = (p - *prev + 6) % 6;
+    if      (d == 1) (*cnt)++;
+    else if (d == 5) (*cnt)--;
+  }
+  *prev = p;
+}
+
 extern volatile adc_buf_t adc_buffer;
 
 uint8_t buzzerFreq          = 0;
@@ -174,6 +191,8 @@ void DMA1_Channel1_IRQHandler(void) {
     uint8_t hall_ul = !(LEFT_HALL_U_PORT->IDR & LEFT_HALL_U_PIN);
     uint8_t hall_vl = !(LEFT_HALL_V_PORT->IDR & LEFT_HALL_V_PIN);
     uint8_t hall_wl = !(LEFT_HALL_W_PORT->IDR & LEFT_HALL_W_PIN);
+    static int8_t hallPrevL = -1;
+    countSteps(&stepsLeft, &hallPrevL, (hall_ul << 2) | (hall_vl << 1) | hall_wl);
 
     /* Set motor inputs here */
     rtU_Left.b_motEna     = enableFin;
@@ -212,6 +231,8 @@ void DMA1_Channel1_IRQHandler(void) {
     uint8_t hall_ur = !(RIGHT_HALL_U_PORT->IDR & RIGHT_HALL_U_PIN);
     uint8_t hall_vr = !(RIGHT_HALL_V_PORT->IDR & RIGHT_HALL_V_PIN);
     uint8_t hall_wr = !(RIGHT_HALL_W_PORT->IDR & RIGHT_HALL_W_PIN);
+    static int8_t hallPrevR = -1;
+    countSteps(&stepsRight, &hallPrevR, (hall_ur << 2) | (hall_vr << 1) | hall_wr);
 
     /* Set motor inputs here */
     rtU_Right.b_motEna      = enableFin;

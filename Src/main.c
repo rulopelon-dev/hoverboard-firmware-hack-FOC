@@ -104,6 +104,7 @@ extern volatile uint16_t pwm_captured_ch2_value;
 //------------------------------------------------------------------------
 uint8_t backwardDrive;
 extern volatile uint32_t buzzerTimer;
+extern volatile int32_t  stepsLeft, stepsRight;   // Hall step counters (bldc.c)
 volatile uint32_t main_loop_counter;
 int16_t batVoltageCalib;         // global variable for calibrated battery voltage
 int16_t board_temp_deg_c;        // global variable for calibrated temperature in degrees Celsius
@@ -117,7 +118,7 @@ int16_t cmdR;                    // global variable for Right Command
 // Local variables
 //------------------------------------------------------------------------
 #if defined(FEEDBACK_SERIAL_USART2) || defined(FEEDBACK_SERIAL_USART3)
-typedef struct{
+typedef struct __attribute__((packed)) {
   uint16_t  start;
   int16_t   cmd1;
   int16_t   cmd2;
@@ -126,8 +127,11 @@ typedef struct{
   int16_t   batVoltage;
   int16_t   boardTemp;
   uint16_t  cmdLed;
+  int32_t   stepsL;      // Hall steps left  (offset 16, 4-byte aligned)
+  int32_t   stepsR;      // Hall steps right
   uint16_t  checksum;
 } SerialFeedback;
+_Static_assert(sizeof(SerialFeedback) == 26, "SerialFeedback size changed");  // 16 + 4 + 4 + 2, no padding
 static SerialFeedback Feedback;
 #endif
 #if defined(FEEDBACK_SERIAL_USART2)
@@ -516,12 +520,16 @@ int main(void) {
         Feedback.speedL_meas	  = (int16_t)rtY_Left.n_mot;
         Feedback.batVoltage	    = (int16_t)batVoltageCalib;
         Feedback.boardTemp	    = (int16_t)board_temp_deg_c;
+        Feedback.stepsL         = stepsLeft;
+        Feedback.stepsR         = stepsRight;
 
         #if defined(FEEDBACK_SERIAL_USART2)
           if(__HAL_DMA_GET_COUNTER(huart2.hdmatx) == 0) {
             Feedback.cmdLed     = (uint16_t)sideboard_leds_L;
             Feedback.checksum   = (uint16_t)(Feedback.start ^ Feedback.cmd1 ^ Feedback.cmd2 ^ Feedback.speedR_meas ^ Feedback.speedL_meas 
-                                           ^ Feedback.batVoltage ^ Feedback.boardTemp ^ Feedback.cmdLed);
+                                           ^ Feedback.batVoltage ^ Feedback.boardTemp ^ Feedback.cmdLed
+                                           ^ (uint16_t)Feedback.stepsL ^ (uint16_t)(Feedback.stepsL >> 16)
+                                           ^ (uint16_t)Feedback.stepsR ^ (uint16_t)(Feedback.stepsR >> 16));
 
             HAL_UART_Transmit_DMA(&huart2, (uint8_t *)&Feedback, sizeof(Feedback));
           }
@@ -530,7 +538,9 @@ int main(void) {
           if(__HAL_DMA_GET_COUNTER(huart3.hdmatx) == 0) {
             Feedback.cmdLed     = (uint16_t)sideboard_leds_R;
             Feedback.checksum   = (uint16_t)(Feedback.start ^ Feedback.cmd1 ^ Feedback.cmd2 ^ Feedback.speedR_meas ^ Feedback.speedL_meas 
-                                           ^ Feedback.batVoltage ^ Feedback.boardTemp ^ Feedback.cmdLed);
+                                           ^ Feedback.batVoltage ^ Feedback.boardTemp ^ Feedback.cmdLed
+                                           ^ (uint16_t)Feedback.stepsL ^ (uint16_t)(Feedback.stepsL >> 16)
+                                           ^ (uint16_t)Feedback.stepsR ^ (uint16_t)(Feedback.stepsR >> 16));
 
             HAL_UART_Transmit_DMA(&huart3, (uint8_t *)&Feedback, sizeof(Feedback));
           }
